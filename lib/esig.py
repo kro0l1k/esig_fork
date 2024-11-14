@@ -4,7 +4,7 @@ import torch
 import numpy as np
 from typing import overload, List, Union
 
-def get_signature_indices(depth, channels, ending_indices):
+def get_signature_indices(depth: int, channels: int, ending_indices: List[int]) -> List[int]:
     if not isinstance(ending_indices, list) or not all(isinstance(i, int) for i in ending_indices) or not all(0 <= i < channels for i in ending_indices):
         raise ValueError(f'The ending_indices argument must be a list of integers between 0 and channels={channels}.')
     sig_indices = []

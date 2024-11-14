@@ -1,6 +1,7 @@
 import itertools
 import math
-from typing import Tuple
+from typing import Tuple, List
+
 
 def count(j: int, I: Tuple[int, ...]) -> int:
     """
@@ -8,13 +9,15 @@ def count(j: int, I: Tuple[int, ...]) -> int:
     """
     return sum(j == i for i in I)
 
-def W_set(n: int, d: int):
+
+def W_set(n: int, d: int) -> List[Tuple[int, ...]]:
     """
     Generate all words of length n with alphabet 0,...,d-1.
     """
     return list(itertools.product(range(d), repeat=n))
 
-def K_set(n: int, d: int):
+
+def K_set(n: int, d: int) -> List[Tuple[int, ...]]:
     """
     Generate all even words of length n with alphabet 0,...,d-1.
     """
@@ -23,7 +26,8 @@ def K_set(n: int, d: int):
     else:
         return list(I for I in W_set(n, d) if all(count(i, I) % 2 == 0 for i in range(d)))
 
-def C_const(I: Tuple[int, ...], d: int):
+
+def C_const(I: Tuple[int, ...], d: int) -> float:
     n = len(I) // 2
     C_I = math.factorial(n)/math.factorial(2*n)
     for i in range(d):
@@ -33,7 +37,8 @@ def C_const(I: Tuple[int, ...], d: int):
         C_I *= math.factorial(n_i)/math.factorial(n_i//2)
     return C_I
 
-def J_set(M: int, tot: Tuple[int, ...]):
+
+def J_set(M: int, tot: Tuple[int, ...]) -> List[Tuple[int, ...]]:
     if tot == 0:
         return [(0,)*M]
     elif M == 1:

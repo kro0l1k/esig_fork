@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Union, List
 
-def chop_and_shift(paths: np.ndarray, chops: Union[int, List[int]]):
+def chop_and_shift(paths: np.ndarray, chops: Union[int, List[int]]) -> Union[np.ndarray, List[np.ndarray]]:
     """
     path: collection of paths of shape (n_samples, length, dim)
     chops: points at which to chop the path, if int needs to divide length - 1 and will be broadcasted
