@@ -1,12 +1,10 @@
-import os
 from typing import Union, List, Tuple
-from multiprocessing import Pool
-from functools import partial
+import warnings
 import numpy as np
 import scipy
 import scipy.linalg
 import scipy.stats
-from fbm import fbm, FBM
+import QuantLib as ql
 
 
 def generate_BM(batch: int, length: int, dims: int, T: float = 1., seed: Union[int, None] = None) -> np.ndarray:
@@ -16,27 +14,26 @@ def generate_BM(batch: int, length: int, dims: int, T: float = 1., seed: Union[i
     return BMs
 
 
-def generate_fBm(batch: int, length: int, dims: int, H: float, seed: Union[int, None] = None, T: float = 1., use_multiprocessing: bool = True, method: str = "daviesharte", chunks: Union[int, None] = None) -> np.ndarray:
+def generate_fBm(batch: int, length: int, dims: int, H: float, seed: Union[int, None] = None, T: float = 1.) -> np.ndarray:
     np.random.seed(seed)
-    fBMs = np.zeros((batch, length+1, dims))
-    if use_multiprocessing:
-        if chunks is None:
-            chunks = 1
-        assert batch % chunks == 0, f"If selecting multiprocessing chunks please ensure these divide batch, got chunks = {chunks}, batch = {batch}."
-        print('Multiprocessing fBm samples...')
-        seeds = [seed + i for i in range(chunks)]
-        with Pool(processes=os.cpu_count() - 2) as pool:
-            # use this instead of simply partial(fbm, n=length, hurst=H, T=T) to control seeds
-            results = pool.map(partial(generate_fBm, batch // chunks, length, dims, H, T=T, use_multiprocessing=False), seeds)
-        print('...finished multiprocessing fBm samples.')
-        for i, fbm_paths in enumerate(results):
-            fBMs[i*batch//chunks:(i+1)*(batch//chunks), :, :] = fbm_paths
+    
+    scale = (T / length) ** H
+    gn = np.random.normal(0.0, 1.0, (batch, length, dims))
+
+    if H == 0.5:
+        fBM_increments = gn * scale
     else:
-        f = FBM(n=length, hurst=H, length=T, method=method)
-        for i in range(batch):
-            for j in range(dims):
-                fBMs[i, :, j] = f.fbm() 
-    return fBMs
+        G = np.zeros((length, length))
+        indices = np.arange(length)
+        i, j = np.meshgrid(indices, indices, indexing='ij')
+        G = 0.5 * (np.abs(i - j - 1)**(2*H) - 2 * np.abs(i - j)**(2*H) + np.abs(i - j + 1)**(2*H))
+
+        C = np.linalg.cholesky(G)
+        gn = np.einsum('ij,njd->nid', C, gn)
+        fBM_increments = gn * scale
+    
+    fBms = np.concatenate([np.zeros((batch, 1, dims)), fBM_increments.cumsum(axis=1)], axis=1)
+    return fBms
 
 
 def generate_MCAR(batch: int, length: int, dims: int, AA: Union[Tuple[Union[float, np.ndarray], ...], List[Union[float, np.ndarray]]], a: Union[np.ndarray, None] = None, Sigma: Union[np.ndarray, None] = None, seed: Union[int, None] = None, T: float = 1., x0: Union[np.ndarray, None] = None) -> np.ndarray:
@@ -47,6 +44,51 @@ def generate_MCAR(batch: int, length: int, dims: int, AA: Union[Tuple[Union[floa
     if Sigma is None:
         Sigma = np.eye(dims) 
     return simulate_MCAR(batch=batch, P=P, AA=AA, a=a, Sigma=Sigma, x0=x0, uniform=True)
+
+
+def generate_Heston(batch: int, length: int, dims: int, theta: float = 0.1, kappa: float = 0.6, sigma: float = 0.2, rho: float = -0.15, S0: float = 1., v0: float = 0.1, seed: Union[int, None] = None, T: float = 1.):
+    # either return only the price process or the price process and the variance process
+    assert dims in [1, 2]
+    
+    # QuantLib implements the Heston process under the risk neutral measure Q (for pricing)
+    # 1. setting dividend_yield = 0.0 this means the *discounted* price process is a martingale;
+    # 2. setting also risk_free_rate = 0.0 this implies the price process is a martingale. 
+    risk_free_rate = 0.0
+    dividend_yield = 0.0
+    day_count = ql.Actual360()
+    
+    spot_handle = ql.QuoteHandle(ql.SimpleQuote(S0))
+    rate_handle = ql.YieldTermStructureHandle(
+        ql.FlatForward(0, ql.NullCalendar(), risk_free_rate, day_count)
+    )
+    dividend_handle = ql.YieldTermStructureHandle(
+        ql.FlatForward(0, ql.NullCalendar(), dividend_yield, day_count)
+    )
+    
+    heston_process = ql.HestonProcess(
+        rate_handle, dividend_handle, spot_handle, v0, kappa, theta, sigma, rho,
+    )
+
+    # use the ql.HestonProcess.QuadraticExponentialMartingale discretization by Andersen
+    # note seed=0 in Quantlib means no seed...
+    rng = ql.GaussianRandomSequenceGenerator(
+        ql.UniformRandomSequenceGenerator(2*length, ql.UniformRandomGenerator(seed=0 if seed is None else seed + 1))
+    )
+    time_grid = ql.TimeGrid(T, length)
+    generator = ql.GaussianMultiPathGenerator(heston_process, time_grid, rng)
+
+    # Generate paths
+    all_paths = []
+    for _ in range(batch):
+        sample_path = generator.next()
+        price_path = np.array(sample_path.value()[0])
+        vol_path = np.array(sample_path.value()[1])
+        if dims == 1:
+            all_paths.append(price_path[:, None])
+        elif dims == 2:
+            all_paths.append(np.stack([price_path, vol_path], axis=1))
+
+    return np.stack(all_paths)
 
 
 # Compute MCAR structural matrix from parameters AA

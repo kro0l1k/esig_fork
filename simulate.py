@@ -1,53 +1,75 @@
+import os
 import time
 import pickle
 from functools import partial
 import numpy as np
 
 from lib.esig import expected_signature_estimate 
-from lib.data.generate import generate_BM, generate_fBm, generate_MCAR
+from lib.data.generate import generate_BM, generate_fBm, generate_MCAR, generate_Heston
 from lib.data.utils import chop_and_shift
 
-if __name__ == "__main__":
-    processes = ['BM', 'MCAR', 'fBm']
-    Ns=[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+if __name__ == "__main__":   
+    processes=['BM', 'fBm', 'MCAR', 'Heston']
     n_samples=10_000
     max_depth=5
+    N_max=100
+    length_max=2**((N_max)//10 + 1)
+    T=1
     dims=2
     seed=0
+    
+    # fBm
     H=0.75
-    AA=(np.ones(dims), np.ones(dims))
+    
+    # MCAR
+    AA=(np.array([[1., 0.], [1., 1.]]), np.array([[1., 1.], [0., 1.]]))
+    
+    # Heston
+    theta = 0.1
+    kappa = 0.6
+    sigma = 0.2
+    rho = -0.15
+    S0 = 1.
+    v0 = 0.1 
+
     path_sampling_schemes=['iid', 'chop']
     estimators=['classic', 'martingale']
+    
+    save_dir=os.path.join('.', 'simulations', 'data')
+    os.makedirs(save_dir, exist_ok=True)
 
     for process in processes:
         start_time=time.time()
 
         # generate most granular sample
-        N_max=max(Ns)
         if process == 'BM':
             generate_fn=generate_BM
         elif process == 'fBm':
-            generate_fn=partial(generate_fBm, H=H, use_multiprocessing=True, chunks=N_max*10)
+            generate_fn=partial(generate_fBm, H=H)
         elif process == 'MCAR':
             generate_fn=partial(generate_MCAR, AA=AA)
+        elif process == 'Heston':
+            generate_fn=partial(generate_Heston, theta=theta, kappa=kappa, sigma=sigma, rho=rho, S0=S0, v0=v0)
         else:
             raise ValueError(f'Unkown process={process}.')
         for path_sampling_scheme in path_sampling_schemes:        
             if path_sampling_scheme == 'iid':
-                paths=generate_fn(batch=n_samples*N_max, length=2**N_max, dims=dims, T=1, seed=seed).reshape((n_samples, N_max, 2**N_max + 1, dims))
-                with open(f'./simulations/data/{process}_paths.pickle', 'wb') as f:
+                paths=generate_fn(batch=n_samples*N_max, length=length_max, dims=dims, T=T, seed=seed).reshape((n_samples, N_max, length_max + 1, dims))
+                with open(os.path.join(save_dir, f'{process}_paths.pickle'), 'wb') as f:
                     pickle.dump(paths, f)
             elif path_sampling_scheme == 'chop':
-                paths=generate_fn(batch=n_samples, length=N_max * 2**N_max, dims=dims, T=N_max, seed=seed)
-                with open(f'./simulations/data/{process}_paths_long.pickle', 'wb') as f:
+                paths=generate_fn(batch=n_samples, length=N_max*length_max, dims=dims, T=T*N_max, seed=seed)
+                with open(os.path.join(save_dir, f'{process}_paths_long.pickle'), 'wb') as f:
                     pickle.dump(paths, f)
-                paths=chop_and_shift(paths, chops=2**N_max)
+                paths=chop_and_shift(paths, chops=length_max)
             else:
                 raise ValueError(f'Unkown path_sampling_scheme={path_sampling_scheme}.')
 
-            print(f'Generating data took {time.time() - start_time}.')
+            print(f'Generating {process} {path_sampling_scheme} data took {time.time() - start_time}.')
 
         # start_time=time.time()
+
+        # Ns=[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
         
         # for estimator in estimators:
         #     esig_estimates={}

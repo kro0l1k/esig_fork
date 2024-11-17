@@ -1,5 +1,6 @@
 conditional-sig-wasserstein-gans
 distribution-regression-streams
 gp-esig-classifier
+controlled-linear-regression
 *.pyc
 *.pickle
