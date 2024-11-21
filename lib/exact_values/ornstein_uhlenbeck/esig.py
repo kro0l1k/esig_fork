@@ -2,7 +2,7 @@ from typing import Union, Tuple, List
 import numpy as np
 import sympy
 import sympy.stats
-from data.utils import MCAR_A
+from lib.data.utils import MCAR_A
 
 
 def expected_signature_OU(j: Union[int, Tuple[int, ...]], T: float, A: np.ndarray, Sigma: np.ndarray) -> Union[np.ndarray, float]:
@@ -69,7 +69,7 @@ def expected_signature_MCAR(j: Union[int, Tuple[int, ...]], T: float, AA: Union[
         if j == 0:
             return 1
         else:
-            return expected_signature_OU(j, T, A_OU, Sigma_OU)[np.ndindex((d,)*j)]
+            return expected_signature_OU(j, T, A_OU, Sigma_OU)[tuple(slice(d) for _ in range(j))]
     elif isinstance(j, tuple):
         if j == tuple():
             return 1.

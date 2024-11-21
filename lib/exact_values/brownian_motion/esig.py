@@ -3,7 +3,7 @@ import numpy as np
 import math
 from functools import partial
 from lib.utils import shuffle
-from lib.brownian_motion.utils import J_set, K_set, W_set, C_const
+from lib.exact_values.brownian_motion.utils import J_set, K_set, W_set, C_const
 
 def expected_signature_linear_approx_BM(j: Union[int, Tuple[int, ...]], M: int, T: float, d: int) -> Union[np.ndarray, float]:
     if isinstance(j, int):
