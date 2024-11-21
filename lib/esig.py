@@ -3,8 +3,9 @@ import iisignature
 import torch
 import numpy as np
 from typing import overload, List, Union
+import warnings
 
-from utils import sig_idx_to_word, sig_word_to_idx, shuffle
+from lib.utils import sig_idx_to_word, sig_word_to_idx, shuffle, chop_and_shift, chop_shift_and_augment
 
 def get_signature_indices(depth: int, channels: int, ending_indices: List[int]) -> List[int]:
     if not isinstance(ending_indices, list) or not all(isinstance(i, int) for i in ending_indices) or not all(0 <= i < channels for i in ending_indices):
@@ -19,7 +20,7 @@ def get_signature_indices(depth: int, channels: int, ending_indices: List[int]) 
     return sig_indices
 
 
-def _expected_signature_estimate_torch(path: torch.Tensor, depth: int, martingale_indices: List[int] = None, stream = False) -> torch.Tensor:    
+def _expected_signature_estimate_torch(path: torch.Tensor, depth: int, martingale_indices: List[int] = None, stream: bool = False) -> torch.Tensor:    
     length, dim = path.shape[-2], path.shape[-1]                                                                                            # shape: (..., samples, length, d)
     signatures_stream = signatory.signature(path.reshape(-1, length, dim), depth, stream=True)                                              # shape: (..., samples, length - 1, d + ... + d**M)
     signatures_stream = signatures_stream.reshape((*path.shape[:-2], *signatures_stream.shape[-2:]))                                        # shape: (..., samples, length - 1, d + ... + d**M)
@@ -48,7 +49,7 @@ def _expected_signature_estimate_torch(path: torch.Tensor, depth: int, martingal
     return signatures.mean(dim=sample_dim)                                                                                                  # shape: (..., length - 1, d + ... + d**M) or (..., d + ... + d**M)
 
 
-def _expected_signature_estimate_numpy(path: np.ndarray, depth: int, martingale_indices: List[int] = None, stream = False) -> np.ndarray:    
+def _expected_signature_estimate_numpy(path: np.ndarray, depth: int, martingale_indices: List[int] = None, stream: bool = False) -> np.ndarray:    
     length, dim = path.shape[-2], path.shape[-1]                                                                                            # shape: (..., samples, length, d)
     signatures_stream = iisignature.sig(path.reshape(-1, length, dim), depth, 2)                                                            # shape: (..., samples, length - 1, d + ... + d**M)
     signatures_stream = signatures_stream.reshape((*path.shape[:-2], *signatures_stream.shape[-2:]))                                        # shape: (..., samples, length - 1, d + ... + d**M)
@@ -78,12 +79,22 @@ def _expected_signature_estimate_numpy(path: np.ndarray, depth: int, martingale_
 
 
 @overload
-def expected_signature_estimate(path: torch.Tensor, depth: int, martingale_indices: List[int] = None, stream = False) -> torch.Tensor: ...
+def expected_signature_estimate(path: torch.Tensor, depth: int, martingale_indices: List[int] = None, stream: bool = False) -> torch.Tensor: ...
 
 @overload
 def expected_signature_estimate(path: np.ndarray, depth: int, martingale_indices: List[int] = None, stream = False) -> np.ndarray: ...
 
-def expected_signature_estimate(path: Union[np.ndarray, torch.Tensor], depth: int, martingale_indices: List[int] = None, stream = False) -> Union[np.ndarray, torch.Tensor]:
+def expected_signature_estimate(path: Union[np.ndarray, torch.Tensor], depth: int, martingale_indices: List[int] = None, stream: bool = False, chop: Union[int, None] = None) -> Union[np.ndarray, torch.Tensor]:
+    """
+    :param path: collection of paths over which to compute the expected signature, shape (..., samples, length, d) if chop = None else (..., length, d)
+    :param depth: depth at which to truncate the expected signature
+    :param martingale_indices: to which dimensions of the path we wish to apply martingale correction
+    :param stream: whether to return the stream of expected signatures or just the expected signature over the full path
+    :param chop: if chop is not None it must be an int dividing length - 1 representing the points at which to chop and shift the path to form samples of length chop, the path is reshaped as (..., samples = (length - 1) // chop, chop + 1, d)
+    :return esigs: the expected signatures computed by averaging over samples, shape (..., length - 1, d + ... + d**depth) if stream = True else (..., d + ... + d**depth)
+    """
+    if chop is not None:
+        path = chop_and_shift(path, chops=chop)
     if isinstance(path, torch.Tensor):
         return _expected_signature_estimate_torch(path=path, depth=depth, martingale_indices=martingale_indices, stream=stream)
     elif isinstance(path, np.ndarray):
@@ -91,18 +102,51 @@ def expected_signature_estimate(path: Union[np.ndarray, torch.Tensor], depth: in
     else:
         raise ValueError(f'Only torch.Tensor and np.ndarray types supported for path, got = {type(path)}.')
     
+import time
 
-def expected_signature_estimate_variance(path: Union[np.ndarray, torch.Tensor], depth: int, martingale_indices: List[int] = None, stream = False) -> Union[np.ndarray, torch.Tensor]:
+def expected_signature_estimate_variance(path: Union[np.ndarray, torch.Tensor], depth: int, martingale_indices: List[int] = None, stream: bool = False, chop: Union[int, None] = None) -> Union[np.ndarray, torch.Tensor]:
     dim = path.shape[-1]
     sig_dim = sum([dim**i for i in range(1, depth+1)])
-    esig = expected_signature_estimate(path=path, depth=2*depth, martingale_indices=martingale_indices, stream=stream)
-    #TODO: computational performance gains can be obtained by vectorizing sig_idx_to_word() and sig_word_to_idx() as well as caching shuffle-products
-    covs = np.zeros((*esig.shape[:-1], sig_dim, sig_dim))
-    for i in range(sig_dim):
-        I = sig_idx_to_word(i, dim)
-        for j in range(i, sig_dim):
-            J = sig_idx_to_word(j, dim)
-            K_set = shuffle(I, J)
-            k_set = [sig_word_to_idx(K) for K in K_set]
-            covs[:, i, j] = esig[..., k_set].sum(axis=-1) - esig[..., i] * esig[..., j]
-    return covs
+    if chop is None:
+        esig = expected_signature_estimate(path=path, depth=2*depth, martingale_indices=martingale_indices, stream=stream)
+        cov = np.zeros((*esig.shape[:-1], sig_dim, sig_dim))
+        for i in range(sig_dim):
+            I = sig_idx_to_word(i, dim)
+            for j in range(i, sig_dim):
+                J = sig_idx_to_word(j, dim)
+                K_set = shuffle(I, J)
+                k_set = [sig_word_to_idx(K, dim) for K in K_set]
+                cov[:, i, j] = cov[:, j, i] = esig[..., k_set].sum(axis=-1) - esig[..., i] * esig[..., j]
+    else:
+        length = path.shape[-2]
+        N = (length - 1) // chop
+        esigs = {}
+        start_time = time.time()
+        print('Computing esigs...')
+        for n in range(N):
+            try:
+                esigs[n] = expected_signature_estimate(path=chop_shift_and_augment(path, n, chop), depth=2*depth, martingale_indices=martingale_indices, stream=stream)
+            except MemoryError:
+                warnings.warn(f'Cutting off long-run covariance at level n = {n-1} due to insufficient RAM.')
+                N = n
+                break
+        print(f'Computing esigs took: {time.time() - start_time}')
+        covs = {n: np.zeros((*esigs[0].shape[:-1], sig_dim, sig_dim)) for n in range(N)}
+        print('Getting covariance values:')
+        tot_time = 0
+        for i in range(sig_dim):
+            I = sig_idx_to_word(i, dim)
+            for j in range(sig_dim):
+                J = sig_idx_to_word(j, dim)
+                for n in range(N):
+                    J_nd = tuple(j + n*dim for j in J)
+                    start_time = time.time()
+                    K_set = shuffle(I, J_nd)
+                    tot_time += (time.time() - start_time)
+                    k_set = [sig_word_to_idx(K, (n+1)*dim) for K in K_set]
+                    covs[n][:, i, j] = esigs[n][..., k_set].sum(axis=-1) - esigs[0][..., i] * esigs[0][..., j]
+        print(f'Shuffling indices took: {tot_time}')
+        cov = covs[0]
+        for n in range(1, N):
+            cov += covs[n] + covs[n].transpose(-2, -1)
+    return cov

@@ -61,7 +61,6 @@ if __name__ == "__main__":
                 paths=generate_fn(batch=n_samples, length=N_max*length_max, dims=dims, T=T*N_max, seed=seed)
                 with open(os.path.join(save_dir, f'{process}_paths_long.pickle'), 'wb') as f:
                     pickle.dump(paths, f)
-                paths=chop_and_shift(paths, chops=length_max)
             else:
                 raise ValueError(f'Unkown path_sampling_scheme={path_sampling_scheme}.')
 

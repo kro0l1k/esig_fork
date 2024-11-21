@@ -1,7 +1,7 @@
 from typing import Union, List, Tuple
 import numpy as np
 import QuantLib as ql
-from utils import simulate_MCAR
+from lib.data.utils import simulate_MCAR
 
 def generate_BM(batch: int, length: int, dims: int, T: float, seed: Union[int, None] = None) -> np.ndarray:
     np.random.seed(seed)
