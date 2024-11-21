@@ -20,7 +20,7 @@ def get_signature_indices(depth: int, channels: int, ending_indices: List[int]) 
     return sig_indices
 
 
-def _expected_signature_estimate_torch(path: torch.Tensor, depth: int, martingale_indices: List[int] = None, stream: bool = False) -> torch.Tensor:    
+def _expected_signature_estimate_torch(path: torch.Tensor, depth: int, martingale_indices: List[int] = None, stream: bool = False, return_samples: bool = False) -> torch.Tensor:    
     length, dim = path.shape[-2], path.shape[-1]                                                                                            # shape: (..., samples, length, d)
     signatures_stream = signatory.signature(path.reshape(-1, length, dim), depth, stream=True)                                              # shape: (..., samples, length - 1, d + ... + d**M)
     signatures_stream = signatures_stream.reshape((*path.shape[:-2], *signatures_stream.shape[-2:]))                                        # shape: (..., samples, length - 1, d + ... + d**M)
@@ -46,10 +46,13 @@ def _expected_signature_estimate_torch(path: torch.Tensor, depth: int, martingal
         signatures[..., sig_indices] -= (c_hat * corrections)[..., sig_indices]                                                             # shape: (..., samples, length - 1, d + ... + d**M) or (..., samples, d + ... + d**M)
     else:
         pass
-    return signatures.mean(dim=sample_dim)                                                                                                  # shape: (..., length - 1, d + ... + d**M) or (..., d + ... + d**M)
+    if return_samples:
+        return signatures                                                                                                                   # shape: (..., samples, length - 1, d + ... + d**M) or (..., samples, d + ... + d**M)
+    else:
+        return signatures.mean(dim=sample_dim)                                                                                              # shape: (..., length - 1, d + ... + d**M) or (..., d + ... + d**M)
 
 
-def _expected_signature_estimate_numpy(path: np.ndarray, depth: int, martingale_indices: List[int] = None, stream: bool = False) -> np.ndarray:    
+def _expected_signature_estimate_numpy(path: np.ndarray, depth: int, martingale_indices: List[int] = None, stream: bool = False, return_samples: bool = False) -> np.ndarray:    
     length, dim = path.shape[-2], path.shape[-1]                                                                                            # shape: (..., samples, length, d)
     signatures_stream = iisignature.sig(path.reshape(-1, length, dim), depth, 2)                                                            # shape: (..., samples, length - 1, d + ... + d**M)
     signatures_stream = signatures_stream.reshape((*path.shape[:-2], *signatures_stream.shape[-2:]))                                        # shape: (..., samples, length - 1, d + ... + d**M)
@@ -75,16 +78,19 @@ def _expected_signature_estimate_numpy(path: np.ndarray, depth: int, martingale_
         signatures[..., sig_indices] -= (c_hat * corrections)[..., sig_indices]                                                             # shape: (..., samples, length - 1, d + ... + d**M) or (..., samples, d + ... + d**M)
     else:
         pass
-    return signatures.mean(axis=sample_axis)                                                                                                # shape: (..., length - 1, d + ... + d**M) or (..., d + ... + d**M)
+    if return_samples:
+        return signatures                                                                                                                   # shape: (..., samples, length - 1, d + ... + d**M) or (..., samples, d + ... + d**M)
+    else:
+        return signatures.mean(axis=sample_axis)                                                                                            # shape: (..., length - 1, d + ... + d**M) or (..., d + ... + d**M)
 
 
 @overload
-def expected_signature_estimate(path: torch.Tensor, depth: int, martingale_indices: List[int] = None, stream: bool = False) -> torch.Tensor: ...
+def expected_signature_estimate(path: torch.Tensor, depth: int, martingale_indices: List[int] = None, stream: bool = False, return_samples: bool = False) -> torch.Tensor: ...
 
 @overload
-def expected_signature_estimate(path: np.ndarray, depth: int, martingale_indices: List[int] = None, stream = False) -> np.ndarray: ...
+def expected_signature_estimate(path: np.ndarray, depth: int, martingale_indices: List[int] = None, stream = False, return_samples: bool = False) -> np.ndarray: ...
 
-def expected_signature_estimate(path: Union[np.ndarray, torch.Tensor], depth: int, martingale_indices: List[int] = None, stream: bool = False, chop: Union[int, None] = None) -> Union[np.ndarray, torch.Tensor]:
+def expected_signature_estimate(path: Union[np.ndarray, torch.Tensor], depth: int, martingale_indices: List[int] = None, stream: bool = False, chop: Union[int, None] = None, return_samples: bool = False) -> Union[np.ndarray, torch.Tensor]:
     """
     :param path: collection of paths over which to compute the expected signature, shape (..., samples, length, d) if chop = None else (..., length, d)
     :param depth: depth at which to truncate the expected signature
@@ -96,27 +102,33 @@ def expected_signature_estimate(path: Union[np.ndarray, torch.Tensor], depth: in
     if chop is not None:
         path = chop_and_shift(path, chops=chop)
     if isinstance(path, torch.Tensor):
-        return _expected_signature_estimate_torch(path=path, depth=depth, martingale_indices=martingale_indices, stream=stream)
+        return _expected_signature_estimate_torch(path=path, depth=depth, martingale_indices=martingale_indices, stream=stream, return_samples=return_samples)
     elif isinstance(path, np.ndarray):
-        return _expected_signature_estimate_numpy(path=path, depth=depth, martingale_indices=martingale_indices, stream=stream)
+        return _expected_signature_estimate_numpy(path=path, depth=depth, martingale_indices=martingale_indices, stream=stream, return_samples=return_samples)
     else:
         raise ValueError(f'Only torch.Tensor and np.ndarray types supported for path, got = {type(path)}.')
     
 import time
 
-def expected_signature_estimate_variance(path: Union[np.ndarray, torch.Tensor], depth: int, martingale_indices: List[int] = None, stream: bool = False, chop: Union[int, None] = None) -> Union[np.ndarray, torch.Tensor]:
+def expected_signature_estimate_variance(path: Union[np.ndarray, torch.Tensor], depth: int, martingale_indices: List[int] = None, stream: bool = False, chop: Union[int, None] = None, sample: bool = True) -> Union[np.ndarray, torch.Tensor]:
     dim = path.shape[-1]
     sig_dim = sum([dim**i for i in range(1, depth+1)])
     if chop is None:
-        esig = expected_signature_estimate(path=path, depth=2*depth, martingale_indices=martingale_indices, stream=stream)
-        cov = np.zeros((*esig.shape[:-1], sig_dim, sig_dim))
-        for i in range(sig_dim):
-            I = sig_idx_to_word(i, dim)
-            for j in range(i, sig_dim):
-                J = sig_idx_to_word(j, dim)
-                K_set = shuffle(I, J)
-                k_set = [sig_word_to_idx(K, dim) for K in K_set]
-                cov[:, i, j] = cov[:, j, i] = esig[..., k_set].sum(axis=-1) - esig[..., i] * esig[..., j]
+        if sample:
+            sigs = expected_signature_estimate(path=path, depth=depth, martingale_indices=martingale_indices, stream=stream, return_samples=True)
+            sample_axis = -3 if stream else -2
+            esigs = sigs.mean(sample_axis)
+            return np.einsum('...i,...j->...ij', sigs - esigs, sigs - esigs)
+        else:
+            esig = expected_signature_estimate(path=path, depth=2*depth, martingale_indices=martingale_indices, stream=stream)
+            cov = np.zeros((*esig.shape[:-1], sig_dim, sig_dim))
+            for i in range(sig_dim):
+                I = sig_idx_to_word(i, dim)
+                for j in range(i, sig_dim):
+                    J = sig_idx_to_word(j, dim)
+                    K_set = shuffle(I, J)
+                    k_set = [sig_word_to_idx(K, dim) for K in K_set]
+                    cov[:, i, j] = cov[:, j, i] = esig[..., k_set].sum(axis=-1) - esig[..., i] * esig[..., j]
     else:
         length = path.shape[-2]
         N = (length - 1) // chop

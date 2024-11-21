@@ -27,7 +27,7 @@ def shuffle(I: Tuple[int, ...], J: Tuple[int, ...]) -> List[Tuple[int, ...]]:
     elif J == tuple():
         return [I]
     else:
-        return set([W + (I[-1],) for W in shuffle(I[:-1], J)] + [W + (J[-1],) for W in shuffle(I, J[:-1])])
+        return [W + (I[-1],) for W in shuffle(I[:-1], J)] + [W + (J[-1],) for W in shuffle(I, J[:-1])]
     
 
 def chop_and_shift(paths: np.ndarray, chops: Union[int, List[int]]) -> Union[np.ndarray, List[np.ndarray]]:
