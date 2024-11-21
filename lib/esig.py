@@ -4,6 +4,8 @@ import torch
 import numpy as np
 from typing import overload, List, Union
 
+from utils import sig_idx_to_word, sig_word_to_idx, shuffle
+
 def get_signature_indices(depth: int, channels: int, ending_indices: List[int]) -> List[int]:
     if not isinstance(ending_indices, list) or not all(isinstance(i, int) for i in ending_indices) or not all(0 <= i < channels for i in ending_indices):
         raise ValueError(f'The ending_indices argument must be a list of integers between 0 and channels={channels}.')
@@ -43,7 +45,7 @@ def _expected_signature_estimate_torch(path: torch.Tensor, depth: int, martingal
         signatures[..., sig_indices] -= (c_hat * corrections)[..., sig_indices]                                                             # shape: (..., samples, length - 1, d + ... + d**M) or (..., samples, d + ... + d**M)
     else:
         pass
-    return signatures.mean(dim=sample_dim)
+    return signatures.mean(dim=sample_dim)                                                                                                  # shape: (..., length - 1, d + ... + d**M) or (..., d + ... + d**M)
 
 
 def _expected_signature_estimate_numpy(path: np.ndarray, depth: int, martingale_indices: List[int] = None, stream = False) -> np.ndarray:    
@@ -72,7 +74,8 @@ def _expected_signature_estimate_numpy(path: np.ndarray, depth: int, martingale_
         signatures[..., sig_indices] -= (c_hat * corrections)[..., sig_indices]                                                             # shape: (..., samples, length - 1, d + ... + d**M) or (..., samples, d + ... + d**M)
     else:
         pass
-    return signatures.mean(axis=sample_axis)
+    return signatures.mean(axis=sample_axis)                                                                                                # shape: (..., length - 1, d + ... + d**M) or (..., d + ... + d**M)
+
 
 @overload
 def expected_signature_estimate(path: torch.Tensor, depth: int, martingale_indices: List[int] = None, stream = False) -> torch.Tensor: ...
@@ -87,3 +90,19 @@ def expected_signature_estimate(path: Union[np.ndarray, torch.Tensor], depth: in
         return _expected_signature_estimate_numpy(path=path, depth=depth, martingale_indices=martingale_indices, stream=stream)
     else:
         raise ValueError(f'Only torch.Tensor and np.ndarray types supported for path, got = {type(path)}.')
+    
+
+def expected_signature_estimate_variance(path: Union[np.ndarray, torch.Tensor], depth: int, martingale_indices: List[int] = None, stream = False) -> Union[np.ndarray, torch.Tensor]:
+    dim = path.shape[-1]
+    sig_dim = sum([dim**i for i in range(1, depth+1)])
+    esig = expected_signature_estimate(path=path, depth=2*depth, martingale_indices=martingale_indices, stream=stream)
+    #TODO: computational performance gains can be obtained by vectorizing sig_idx_to_word() and sig_word_to_idx() as well as caching shuffle-products
+    covs = np.zeros((*esig.shape[:-1], sig_dim, sig_dim))
+    for i in range(sig_dim):
+        I = sig_idx_to_word(i, dim)
+        for j in range(i, sig_dim):
+            J = sig_idx_to_word(j, dim)
+            K_set = shuffle(I, J)
+            k_set = [sig_word_to_idx(K) for K in K_set]
+            covs[:, i, j] = esig[..., k_set].sum(axis=-1) - esig[..., i] * esig[..., j]
+    return covs
