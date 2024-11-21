@@ -110,15 +110,16 @@ def expected_signature_estimate(path: Union[np.ndarray, torch.Tensor], depth: in
     
 import time
 
-def expected_signature_estimate_variance(path: Union[np.ndarray, torch.Tensor], depth: int, martingale_indices: List[int] = None, stream: bool = False, chop: Union[int, None] = None, sample: bool = True) -> Union[np.ndarray, torch.Tensor]:
+def expected_signature_estimate_variance(path: np.ndarray, depth: int, martingale_indices: List[int] = None, stream: bool = False, chop: Union[int, None] = None, sample: bool = True, overlapping_samples: bool = False) -> np.ndarray:
+    #NOTE: sample=True is faster and yields the same result as sample=False with overlapping_samples=False.
     dim = path.shape[-1]
     sig_dim = sum([dim**i for i in range(1, depth+1)])
     if chop is None:
         if sample:
             sigs = expected_signature_estimate(path=path, depth=depth, martingale_indices=martingale_indices, stream=stream, return_samples=True)
-            sample_axis = -3 if stream else -2
-            esigs = sigs.mean(sample_axis)
-            return np.einsum('...i,...j->...ij', sigs - esigs, sigs - esigs)
+            sigs = np.swapaxes(sigs, -3, -2) if stream else sigs
+            esigs = sigs.mean(-2, keepdims=True)
+            cov = np.einsum('...i,...j->...ij', sigs - esigs, sigs - esigs).mean(-3)
         else:
             esig = expected_signature_estimate(path=path, depth=2*depth, martingale_indices=martingale_indices, stream=stream)
             cov = np.zeros((*esig.shape[:-1], sig_dim, sig_dim))
@@ -132,33 +133,39 @@ def expected_signature_estimate_variance(path: Union[np.ndarray, torch.Tensor], 
     else:
         length = path.shape[-2]
         N = (length - 1) // chop
-        esigs = {}
-        start_time = time.time()
-        print('Computing esigs...')
-        for n in range(N):
-            try:
-                esigs[n] = expected_signature_estimate(path=chop_shift_and_augment(path, n, chop), depth=2*depth, martingale_indices=martingale_indices, stream=stream)
-            except MemoryError:
-                warnings.warn(f'Cutting off long-run covariance at level n = {n-1} due to insufficient RAM.')
-                N = n
-                break
-        print(f'Computing esigs took: {time.time() - start_time}')
-        covs = {n: np.zeros((*esigs[0].shape[:-1], sig_dim, sig_dim)) for n in range(N)}
-        print('Getting covariance values:')
-        tot_time = 0
-        for i in range(sig_dim):
-            I = sig_idx_to_word(i, dim)
-            for j in range(sig_dim):
-                J = sig_idx_to_word(j, dim)
-                for n in range(N):
-                    J_nd = tuple(j + n*dim for j in J)
-                    start_time = time.time()
-                    K_set = shuffle(I, J_nd)
-                    tot_time += (time.time() - start_time)
-                    k_set = [sig_word_to_idx(K, (n+1)*dim) for K in K_set]
-                    covs[n][:, i, j] = esigs[n][..., k_set].sum(axis=-1) - esigs[0][..., i] * esigs[0][..., j]
-        print(f'Shuffling indices took: {tot_time}')
-        cov = covs[0]
-        for n in range(1, N):
-            cov += covs[n] + covs[n].transpose(-2, -1)
+        n_max = int(N**0.25)
+        if sample:
+            sigs = expected_signature_estimate(path=path, depth=depth, martingale_indices=martingale_indices, stream=stream, chop=chop, return_samples=True)
+            sigs = np.swapaxes(sigs, -3, -2) if stream else sigs
+            esigs = sigs.mean(-2, keepdims=True)
+            cov = np.einsum('...i,...j->...ij', sigs - esigs, sigs - esigs).mean(-3)
+            #NOTE: use Newey-West / Bartlett kernel to ensure positive semi-definiteness when using overlapping samples
+            for n in range(1, n_max):
+                if overlapping_samples:
+                    cov_n = np.einsum('...i,...j->...ij', sigs[..., :(N-n), :] - esigs, sigs[..., n:, :] - esigs).mean(-3)
+                else:
+                    cov_n = np.einsum('...i,...j->...ij', sigs[..., :(N-n):(n+1), :] - esigs, sigs[..., n::(n+1), :] - esigs).mean(-3)
+                cov += (1 - n/n_max) * (cov_n + np.swapaxes(cov_n, -2, -1))
+        else:
+            esigs = {}
+            for n in range(n_max):
+                try:
+                    esigs[n] = expected_signature_estimate(path=chop_shift_and_augment(path, n, chop), depth=2*depth, martingale_indices=martingale_indices, stream=stream)
+                except MemoryError:
+                    warnings.warn(f'Cutting off long-run covariance at level n = {n-1} due to insufficient RAM.')
+                    n_max = n
+                    break
+            covs = {n: np.zeros((*esigs[0].shape[:-1], sig_dim, sig_dim)) for n in range(N)}
+            for i in range(sig_dim):
+                I = sig_idx_to_word(i, dim)
+                for j in range(sig_dim):
+                    J = sig_idx_to_word(j, dim)
+                    for n in range(N):
+                        J_nd = tuple(j + n*dim for j in J)
+                        K_set = shuffle(I, J_nd)
+                        k_set = [sig_word_to_idx(K, (n+1)*dim) for K in K_set]
+                        covs[n][:, i, j] = esigs[n][..., k_set].sum(axis=-1) - esigs[0][..., i] * esigs[0][..., j]
+            cov = covs[0]
+            for n in range(1, n_max):
+                cov += (1 - n/n_max) * (covs[n] + np.swapaxes(covs[n], -2, -1))
     return cov

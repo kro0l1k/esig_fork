@@ -1,12 +1,9 @@
 import os
 import time
-import pickle
 from functools import partial
 import numpy as np
 
-from lib.esig import expected_signature_estimate 
 from lib.data.generate import generate_BM, generate_fBm, generate_MCAR, generate_Heston
-from lib.utils import chop_and_shift
 
 if __name__ == "__main__":   
     processes=['BM', 'fBm', 'MCAR', 'Heston']
