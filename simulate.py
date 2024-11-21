@@ -55,12 +55,10 @@ if __name__ == "__main__":
         for path_sampling_scheme in path_sampling_schemes:        
             if path_sampling_scheme == 'iid':
                 paths=generate_fn(batch=n_samples*N_max, length=length_max, dims=dims, T=T, seed=seed).reshape((n_samples, N_max, length_max + 1, dims))
-                with open(os.path.join(save_dir, f'{process}_paths.pickle'), 'wb') as f:
-                    pickle.dump(paths, f)
+                np.save(os.path.join(save_dir, f'{process}_paths.npy'), paths)
             elif path_sampling_scheme == 'chop':
                 paths=generate_fn(batch=n_samples, length=N_max*length_max, dims=dims, T=T*N_max, seed=seed)
-                with open(os.path.join(save_dir, f'{process}_paths_long.pickle'), 'wb') as f:
-                    pickle.dump(paths, f)
+                np.save(os.path.join(save_dir, f'{process}_paths_long.npy'), paths)
             else:
                 raise ValueError(f'Unkown path_sampling_scheme={path_sampling_scheme}.')
 
