@@ -58,6 +58,8 @@ def expected_signature_MCAR(j: Union[int, Tuple[int, ...]], T: float, AA: Union[
     """
     p = len(AA)
     d = AA[0].shape[0]
+    if Sigma is None:
+        Sigma = np.eye(d)
     pd = p*d
     A_OU = MCAR_A(AA)
     E = np.zeros([pd, d])
