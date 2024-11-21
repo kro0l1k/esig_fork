@@ -19,13 +19,12 @@ def generate_fBm(batch: int, length: int, dims: int, T: float, H: float, seed: U
     if H == 0.5:
         fBM_increments = gn * scale
     else:
-        G = np.zeros((length, length))
         indices = np.arange(length)
         i, j = np.meshgrid(indices, indices, indexing='ij')
         G = 0.5 * (np.abs(i - j - 1)**(2*H) - 2 * np.abs(i - j)**(2*H) + np.abs(i - j + 1)**(2*H))
-
         C = np.linalg.cholesky(G)
-        gn = np.einsum('ij,njd->nid', C, gn)
+
+        gn = np.einsum('ij,njd->nid', C, gn, optimize='optimal')
         fBM_increments = gn * scale
     
     fBms = np.concatenate([np.zeros((batch, 1, dims)), fBM_increments.cumsum(axis=1)], axis=1)
