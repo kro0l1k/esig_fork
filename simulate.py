@@ -9,7 +9,7 @@ if __name__ == "__main__":
     processes=['BM', 'fBm', 'MCAR', 'Heston']
     n_samples=10_000
     max_depth=5
-    N_max=100
+    N_max=60
     length_max=2**((N_max)//10 + 1)
     T=1
     dims=2

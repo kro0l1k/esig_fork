@@ -8,7 +8,7 @@ from lib.esig import expected_signature_estimate, expected_signature_estimate_va
 
 if __name__ == "__main__":   
     processes=['BM', 'fBm', 'MCAR', 'Heston']
-    Ns = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+    Ns = [10, 20, 30, 40, 50, 60]
     max_depth = 3
     dims = 2
     N_max = max(Ns)
@@ -48,11 +48,11 @@ if __name__ == "__main__":
             else:
                 raise ValueError(f'Unkown path_sampling_scheme={path_sampling_scheme}.')
             start_time = time.time()
-            esig_estimates[N] = expected_signature_estimate(paths_N, max_depth, martingale_indices=None, chop=chop)
-            esig_var_estimates[N] = expected_signature_estimate_variance(paths_N, max_depth, chop=chop)
-            esig_martingale_estimates[N] = expected_signature_estimate(paths_N, max_depth, martingale_indices=list(range(dims)), chop=chop)
+            esig_estimates[f'N={N}'] = expected_signature_estimate(paths_N, max_depth, martingale_indices=None, chop=chop)
+            esig_var_estimates[f'N={N}'] = expected_signature_estimate_variance(paths_N, max_depth, chop=chop)
+            esig_martingale_estimates[f'N={N}'] = expected_signature_estimate(paths_N, max_depth, martingale_indices=list(range(dims)), chop=chop)
             print(f'Estimating esigs with N = {N} took {time.time() - start_time}.')
             
-        np.savez(os.path.join(save_dir, f'{process}_esig_estimates_{path_sampling_scheme}.pickle'), **esig_estimates)
-        np.savez(os.path.join(save_dir, f'{process}_esig_var_estimates_{path_sampling_scheme}.pickle'), **esig_var_estimates)
-        np.savez(os.path.join(save_dir, f'{process}_esig_martingale_estimates_{path_sampling_scheme}.pickle'), **esig_martingale_estimates)
+        np.savez(os.path.join(save_dir, f'{process}_esig_estimates_{path_sampling_scheme}.npz'), **esig_estimates)
+        np.savez(os.path.join(save_dir, f'{process}_esig_var_estimates_{path_sampling_scheme}.npz'), **esig_var_estimates)
+        np.savez(os.path.join(save_dir, f'{process}_esig_martingale_estimates_{path_sampling_scheme}.npz'), **esig_martingale_estimates)
