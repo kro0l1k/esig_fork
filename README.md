@@ -1,4 +1,4 @@
-# Estimating Expected Signatures
+# Expected Signature Estimators
 
 This repo provides code for estimating expected signatures 
 ```math
