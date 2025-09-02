@@ -4,8 +4,11 @@ import QuantLib as ql
 from lib.data.utils import simulate_MCAR
 
 def generate_BM(batch: int, length: int, dims: int, T: float, seed: Union[int, None] = None) -> np.ndarray:
+    # batch = nsamples * MC_SAM_LEN,, dims = 2 (dim of signal)
+    #  length = 2 **N_max if we use independent paths or 
     np.random.seed(seed)
     BM_increments = np.random.normal(loc=0, scale=np.sqrt(T/length), size=(batch, length, dims))
+    print("shape of sampled increments: ", BM_increments.shape)
     BMs = np.concatenate([np.zeros((batch, 1, dims)), BM_increments.cumsum(axis=1)], axis=1)
     return BMs
 

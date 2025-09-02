@@ -1,4 +1,4 @@
-import signatory
+# import signatory
 import iisignature
 import torch
 import numpy as np
@@ -20,39 +20,45 @@ def get_signature_indices(depth: int, channels: int, ending_indices: List[int]) 
     return sig_indices
 
 
-def _expected_signature_estimate_torch(path: torch.Tensor, depth: int, martingale_indices: List[int] = None, stream: bool = False, return_samples: bool = False) -> torch.Tensor:    
-    length, dim = path.shape[-2], path.shape[-1]                                                                                            # shape: (..., samples, length, d)
-    signatures_stream = signatory.signature(path.reshape(-1, length, dim), depth, stream=True)                                              # shape: (..., samples, length - 1, d + ... + d**M)
-    signatures_stream = signatures_stream.reshape((*path.shape[:-2], *signatures_stream.shape[-2:]))                                        # shape: (..., samples, length - 1, d + ... + d**M)
-    signatures = signatures_stream if stream else signatures_stream[..., -1, :]                                                             # shape: (..., samples, length - 1, d + ... + d**M) or (..., samples, d + ... + d**M) 
-    sample_dim = -3 if stream else -2
-    if martingale_indices:
-        signatures_lower = signatures_stream[..., :-1, :-dim**depth]                                                                        # shape: (..., samples, length - 2, d + ... + d**(M-1))
-        # pre-pend signature starting values at zero
-        signatures_start = torch.cat([torch.zeros(*path.shape[:-2], 1, dim**i).to(path.device) for i in range(1, depth)], dim=-1)           # shape: (..., samples, 1, d + ... + d**(M-1))	
-        signatures_lower = torch.cat([signatures_start, signatures_lower], dim=-2)                                                          # shape: (..., samples, length - 1, d + ... + d**(M-1))        
-        signatures_lower = torch.cat([torch.ones(*path.shape[:-2], length - 1, 1).to(path.device), signatures_lower], dim=-1)               # shape: (..., samples, length - 1, 1 + d + ... + d**(M-1))
-        corrections = torch.einsum('...k,...l->...kl', signatures_lower, torch.diff(path, dim=-2))                                          # shape: (..., samples, length - 1, 1 + d + ... + d**(M-1), d)
-        if stream:
-            corrections = torch.cumsum(corrections, dim=-3).reshape((*path.shape[:-2], length - 1, -1))                                     # shape: (..., samples, length - 1, d + ... + d**M)
-        else:
-            corrections = torch.sum(corrections, dim=-3).reshape((*path.shape[:-2], -1))                                                    # shape: (..., samples, d + ... + d**M)
-        num = torch.einsum('...,...->...', signatures, corrections).mean(dim=sample_dim)                                                    # shape: (..., length - 1, d + ... + d**M) or (..., d + ... + d**M)
-        denom = (corrections**2).mean(axis=sample_dim)                                                                                      # shape: (..., length - 1, d + ... + d**M) or (..., d + ... + d**M)
-        #NOTE: replacing zeros in denom with ones both c_hat and corrections are zero at those indices
-        denom[denom == 0] = 1
-        c_hat = (num / denom).unsqueeze(dim=sample_dim)                                                                                     # shape: (..., length - 1, d + ... + d**M) or (..., d + ... + d**M)
-        sig_indices = get_signature_indices(depth, dim, martingale_indices)
-        signatures[..., sig_indices] -= (c_hat * corrections)[..., sig_indices]                                                             # shape: (..., samples, length - 1, d + ... + d**M) or (..., samples, d + ... + d**M)
-    else:
-        pass
-    if return_samples:
-        return signatures                                                                                                                   # shape: (..., samples, length - 1, d + ... + d**M) or (..., samples, d + ... + d**M)
-    else:
-        return signatures.mean(dim=sample_dim)                                                                                              # shape: (..., length - 1, d + ... + d**M) or (..., d + ... + d**M)
+# def _expected_signature_estimate_torch(path: torch.Tensor, depth: int, martingale_indices: List[int] = None, stream: bool = False, return_samples: bool = False) -> torch.Tensor:    
+#     length, dim = path.shape[-2], path.shape[-1]                                                                                            # shape: (..., samples, length, d)
+#     signatures_stream = signatory.signature(path.reshape(-1, length, dim), depth, stream=True)                                              # shape: (..., samples, length - 1, d + ... + d**M)
+#     signatures_stream = signatures_stream.reshape((*path.shape[:-2], *signatures_stream.shape[-2:]))                                        # shape: (..., samples, length - 1, d + ... + d**M)
+#     signatures = signatures_stream if stream else signatures_stream[..., -1, :]                                                             # shape: (..., samples, length - 1, d + ... + d**M) or (..., samples, d + ... + d**M) 
+#     sample_dim = -3 if stream else -2
+#     if martingale_indices:
+#         signatures_lower = signatures_stream[..., :-1, :-dim**depth]                                                                        # shape: (..., samples, length - 2, d + ... + d**(M-1))
+#         # pre-pend signature starting values at zero
+#         signatures_start = torch.cat([torch.zeros(*path.shape[:-2], 1, dim**i).to(path.device) for i in range(1, depth)], dim=-1)           # shape: (..., samples, 1, d + ... + d**(M-1))	
+#         signatures_lower = torch.cat([signatures_start, signatures_lower], dim=-2)                                                          # shape: (..., samples, length - 1, d + ... + d**(M-1))        
+#         signatures_lower = torch.cat([torch.ones(*path.shape[:-2], length - 1, 1).to(path.device), signatures_lower], dim=-1)               # shape: (..., samples, length - 1, 1 + d + ... + d**(M-1))
+#         corrections = torch.einsum('...k,...l->...kl', signatures_lower, torch.diff(path, dim=-2))                                          # shape: (..., samples, length - 1, 1 + d + ... + d**(M-1), d)
+#         if stream:
+#             corrections = torch.cumsum(corrections, dim=-3).reshape((*path.shape[:-2], length - 1, -1))                                     # shape: (..., samples, length - 1, d + ... + d**M)
+#         else:
+#             corrections = torch.sum(corrections, dim=-3).reshape((*path.shape[:-2], -1))                                                    # shape: (..., samples, d + ... + d**M)
+#         num = torch.einsum('...,...->...', signatures, corrections).mean(dim=sample_dim)                                                    # shape: (..., length - 1, d + ... + d**M) or (..., d + ... + d**M)
+#         denom = (corrections**2).mean(axis=sample_dim)                                                                                      # shape: (..., length - 1, d + ... + d**M) or (..., d + ... + d**M)
+#         #NOTE: replacing zeros in denom with ones both c_hat and corrections are zero at those indices
+#         denom[denom == 0] = 1
+#         c_hat = (num / denom).unsqueeze(dim=sample_dim)                                                                                     # shape: (..., length - 1, d + ... + d**M) or (..., d + ... + d**M)
+#         sig_indices = get_signature_indices(depth, dim, martingale_indices)
+#         signatures[..., sig_indices] -= (c_hat * corrections)[..., sig_indices]                                                             # shape: (..., samples, length - 1, d + ... + d**M) or (..., samples, d + ... + d**M)
+#     else:
+#         pass
+#     if return_samples:
+#         return signatures                                                                                                                   # shape: (..., samples, length - 1, d + ... + d**M) or (..., samples, d + ... + d**M)
+#     else:
+#         return signatures.mean(dim=sample_dim)                                                                                              # shape: (..., length - 1, d + ... + d**M) or (..., d + ... + d**M)
 
 
-def _expected_signature_estimate_numpy(path: np.ndarray, depth: int, martingale_indices: List[int] = None, stream: bool = False, return_samples: bool = False) -> np.ndarray:    
+def _expected_signature_estimate_numpy(
+    path: np.ndarray,
+    depth: int,
+    martingale_indices: List[int] = None,
+    stream: bool = False,
+    return_samples: bool = False) -> np.ndarray:    
+    
     length, dim = path.shape[-2], path.shape[-1]                                                                                            # shape: (..., samples, length, d)
     signatures_stream = iisignature.sig(path.reshape(-1, length, dim), depth, 2)                                                            # shape: (..., samples, length - 1, d + ... + d**M)
     signatures_stream = signatures_stream.reshape((*path.shape[:-2], *signatures_stream.shape[-2:]))                                        # shape: (..., samples, length - 1, d + ... + d**M)
