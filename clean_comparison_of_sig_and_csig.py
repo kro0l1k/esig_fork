@@ -105,23 +105,19 @@ def controlled_signature_upto3(path, order: int):
     #     return jnp.concatenate([C1, C2.ravel()])
     return jnp.concatenate([C1, C2.ravel(), C3.ravel()])
 
-def compute_c_star( normal_sigs, controlled_sigs):
-    """
-    Args:
-        normal_sigs (jnp.array: n_samples_per_exp, sig_depth): simple sigs
-        controlled_sigs (jnp.array: n_samples_per_exp, sig_depth): controlled sigs
+def compute_c_star(normal_sigs, controlled_sigs):
+    # X: (n, p), Y: (n, p)
+    X = normal_sigs
+    Y = controlled_sigs
+    Xc = X - jnp.mean(X, axis=0, keepdims=True)
+    Yc = Y - jnp.mean(Y, axis=0, keepdims=True)
+    # population-style (divide by n); matches jnp.var default (population)
+    cov_term = jnp.mean(Xc * Yc, axis=0)            # (p,)
+    var_term = jnp.mean(Yc * Yc, axis=0)            # (p,)
+    # safe divide
+    var_term = jnp.where(var_term == 0, 1.0, var_term)
+    return cov_term / var_term
 
-    Returns:
-        c_star (jnp.array: sig_depth): optimal control variate coefficients 
-    """
-    print(" shape of normal_sigs: ", normal_sigs.shape, " min and max: ", jnp.min(normal_sigs), jnp.max(normal_sigs))
-    print(" shape of controlled_sigs: ", controlled_sigs.shape, " min and max: ", jnp.min(controlled_sigs), jnp.max(controlled_sigs))
-    cov_term = jnp.diag(jnp.dot(normal_sigs.T, controlled_sigs))
-    var_term = jnp.var(controlled_sigs, axis=0)
-    print(" cov term min and max: ", jnp.min(cov_term), jnp.max(cov_term))
-    print(" var term min and max: ", jnp.min(var_term), jnp.max(var_term))
-    c_star = cov_term / var_term
-    return c_star
 
 def main():
     n_experimetns, n_samples_per_exp, n, d, order = 20, 100, 500, 2,  3
