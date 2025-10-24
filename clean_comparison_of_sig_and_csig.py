@@ -3,12 +3,15 @@ import jax
 import jax.numpy as jnp
 import signax
 import numpy as np
+
+from sample_different_S import SignalGenerator
+
 def get_a_path(n, d):
     assert d == 2
     t = jnp.linspace(0, 4 * jnp.pi, n)
-    dim1 = jnp.sin(t)
+    dim1 = jnp.sin(t)[:, None] + (np.random.randn(n) * 0.1)[:, None]
     dim2 = jnp.cos(t)[:, None] + (np.random.randn(n) * 0.1)[:, None]
-    return jnp.concatenate([dim1[:, None], dim2], axis=1)
+    return jnp.concatenate([dim1, dim2], axis=1)
 
 def _tensor(a, b):
     return jnp.einsum("i,j->ij", a, b)
@@ -16,10 +19,11 @@ def _tensor(a, b):
 def _tensor3(a, b, c):
     return jnp.einsum("i,j,k->ijk", a, b, c)
 
-# @jax.jit(static_argnames=("order",))
+
+@jax.jit
 def signature_upto3(path, order: int):
-    if order < 1 or order > 3:
-        raise ValueError("order must be 1, 2, or 3")
+    # if order < 1 or order > 3:
+    #     raise ValueError("order must be 1, 2, or 3")
 
     inc = jnp.diff(path, axis=0)          # (n-1, d)
     d = inc.shape[1]
@@ -41,13 +45,14 @@ def signature_upto3(path, order: int):
 
     S1, S2, S3 = jax.lax.fori_loop(0, inc.shape[0], body, (S1, S2, S3))
 
-    if order == 1:
-        return S1
-    if order == 2:
-        return jnp.concatenate([S1, S2.ravel()])
+    # if order == 1:
+    #     return S1
+    # if order == 2:
+    #     return jnp.concatenate([S1, S2.ravel()])
     return jnp.concatenate([S1, S2.ravel(), S3.ravel()])
 
-# @jax.jit(static_argnames=("order",))
+
+@jax.jit
 def controlled_signature_upto3(path, order: int):
     """
     Control-variates vector S^c up to 'order' (1..3) in the same flattening
@@ -58,8 +63,8 @@ def controlled_signature_upto3(path, order: int):
       level-3: prefix S2 ⊗ ΔX
     with prefix signatures updated by Chen after each accumulation.
     """
-    if order < 1 or order > 3:
-        raise ValueError("order must be 1, 2, or 3")
+    # if order < 1 or order > 3:
+    #     raise ValueError("order must be 1, 2, or 3")
 
     inc = jnp.diff(path, axis=0)          # (n-1, d)
     d = inc.shape[1]
@@ -94,75 +99,106 @@ def controlled_signature_upto3(path, order: int):
 
     S1, S2, S3, C1, C2, C3 = jax.lax.fori_loop(0, inc.shape[0], body, (S1, S2, S3, C1, C2, C3))
 
-    if order == 1:
-        return C1
-    if order == 2:
-        return jnp.concatenate([C1, C2.ravel()])
+    # if order == 1:
+    #     return C1
+    # if order == 2:
+    #     return jnp.concatenate([C1, C2.ravel()])
     return jnp.concatenate([C1, C2.ravel(), C3.ravel()])
 
+def compute_c_star( normal_sigs, controlled_sigs):
+    """
+    Args:
+        normal_sigs (jnp.array: n_samples_per_exp, sig_depth): simple sigs
+        controlled_sigs (jnp.array: n_samples_per_exp, sig_depth): controlled sigs
+
+    Returns:
+        c_star (jnp.array: sig_depth): optimal control variate coefficients 
+    """
+    print(" shape of normal_sigs: ", normal_sigs.shape, " min and max: ", jnp.min(normal_sigs), jnp.max(normal_sigs))
+    print(" shape of controlled_sigs: ", controlled_sigs.shape, " min and max: ", jnp.min(controlled_sigs), jnp.max(controlled_sigs))
+    cov_term = jnp.diag(jnp.dot(normal_sigs.T, controlled_sigs))
+    var_term = jnp.var(controlled_sigs, axis=0)
+    print(" cov term min and max: ", jnp.min(cov_term), jnp.max(cov_term))
+    print(" var term min and max: ", jnp.min(var_term), jnp.max(var_term))
+    c_star = cov_term / var_term
+    return c_star
+
 def main():
-    n_samples, n, d, order = 10, 10, 2, 3
+    n_experimetns, n_samples_per_exp, n, d, order = 20, 100, 500, 2,  3
     # path = get_a_path(n, d)
-
+    signal_generator = SignalGenerator()
     
-    sigs_lib = []
-    sigs_manual = []
-    ctrls_manual = []
-
-    for i in range(n_samples):
-        path = get_a_path(n, d)
-        print("shape of path: ", path.shape)
-        sig_lib = signax.signature(path, order)  # your installed signax uses (path, order)
-        print("shape of si from lib:    ", sig_lib.shape)
-        sig_manual = signature_upto3(path, order)
-        ctrl_manual = controlled_signature_upto3(path, order)
-
-        sigs_lib.append(sig_lib)
-        sigs_manual.append(sig_manual)
-        ctrls_manual.append(ctrl_manual)
-
-    # for each of the indices, compare the distributions 
-    sigs_lib = jnp.stack(sigs_lib)
-    sigs_manual = jnp.stack(sigs_manual)
-    ctrls_manual = jnp.stack(ctrls_manual)  
     
-    print(" HAVE WE STACKED THEM CORRECTLY?")
-    print("Shape of stacked signatures (signax): ", sigs_lib.shape)
-    print("Shape of stacked signatures (manual): ", sigs_manual.shape)
-    print("Shape of stacked controlled signatures (manual): ", ctrls_manual.shape)
+    path = signal_generator.sample_s(d,n,"OU")
 
-    mean_lib =  jnp.mean(sigs_lib, axis=0)
-    mean_manual = jnp.mean(sigs_manual, axis=0)
-    mean_ctrl = jnp.mean(ctrls_manual, axis=0)
-    print("Mean signature from signax: ", mean_lib)
-    print("Mean signature from manual: ", mean_manual)
-    print("Mean controlled signature from manual: ", mean_ctrl)
+    # plot the sampled path
+    plt.plot(path)
+    plt.title("Sampled Path")
+    plt.xlabel("Time")
+    plt.ylabel("Value")
+    plt.show()
+    plt.close()
+
+    classic_Estimator = []
+    control_Variate_Estimator = []
+
+    for exp_idx in range(n_experimetns):    
+        sigs_lib = []
+        sigs_manual = []
+        ctrls_manual = []
+
+        for i in range(n_samples_per_exp):
+            path = signal_generator.sample_s(d,n,"OU")
+            # print(" Sampled path shape: ", path.shape)
+            sig_lib = signax.signature(path, order)  # your installed signax uses (path, order)
+            
+            sig_manual = signature_upto3(path, order)
+            ctrl_manual = controlled_signature_upto3(path, order)
+
+            sigs_lib.append(sig_lib)
+            sigs_manual.append(sig_manual)
+            ctrls_manual.append(ctrl_manual)
+
+        # for each of the indices, compare the distributions 
+        sigs_lib = jnp.stack(sigs_lib)
+        sigs_manual = jnp.stack(sigs_manual)
+        ctrls_manual = jnp.stack(ctrls_manual)  
     
-    var_lib =  jnp.var(sigs_lib, axis=0)
-    var_manual = jnp.var(sigs_manual, axis=0)
-    var_ctrl = jnp.var(ctrls_manual, axis=0)
-    print("Variance signature from signax: ", var_lib)
-    print("Variance signature from manual: ", var_manual)
-    print("Variance controlled signature from manual: ", var_ctrl)
     
-    # generate plots to compare distributions
-    num_indices = sigs_lib.shape[1]
+        c_star = compute_c_star(sigs_lib, ctrls_manual)
+
+        print(f"Experiment {exp_idx}: c_star = {c_star}")
+        print(" shape of c_star: ", c_star.shape , " should be 14")
+        
+        MC_estimate = jnp.mean(sigs_lib, axis=0)
+        # print(f"Experiment {exp_idx}: MC estimate = {MC_estimate.shape}, should be (14,)    ")
+        
+        CV_estimate = MC_estimate - c_star * jnp.mean(ctrls_manual, axis=0)
+        # print(f"Experiment {exp_idx}: CV estimate = {CV_estimate.shape}, should be (14,)    ")
+        classic_Estimator.append(MC_estimate)
+        control_Variate_Estimator.append(CV_estimate)
+        
+
+    # Convert lists to arrays for plotting
+    classic_Estimator = jnp.stack(classic_Estimator)
+    control_Variate_Estimator = jnp.stack(control_Variate_Estimator)
+    
+    # generate plots to compare distributions of estimators
+    num_indices = classic_Estimator.shape[1]
     n_cols = 4
     # Limit to max 6 rows
     n_rows = min((num_indices + n_cols - 1) // n_cols, 6)
-    indices_to_plot = 14
+    indices_to_plot = min(num_indices, 14)
     _, axes = plt.subplots(n_rows, n_cols, figsize=(10, 10))
     axes = axes.flatten() if num_indices > 1 else [axes]
     
     for i in range(indices_to_plot):
         ax = axes[i]
-        ax.hist(sigs_lib[:, i], bins=10, alpha=0.6, label='signax',
+        ax.hist(classic_Estimator[:, i], bins=10, alpha=0.6, label='Classic MC',
                 color='blue')
-        ax.hist(sigs_manual[:, i], bins=10, alpha=0.6, label='manual',
-                color='orange')
-        ax.hist(ctrls_manual[:, i], bins=10, alpha=0.6, label='ctrl',
-                color='green')
-        ax.set_title(f'Index {i}', fontsize=10)
+        ax.hist(control_Variate_Estimator[:, i], bins=10, alpha=0.6, label='Control Variate',
+                color='red')
+        ax.set_title(f'Estimator Index {i}', fontsize=10)
         ax.set_xlabel('Value', fontsize=8)
         ax.set_ylabel('Count', fontsize=8)
         ax.legend(fontsize=8)

@@ -49,7 +49,7 @@ class SignalGenerator:
                 theta = np.ones(d) * ou_scale
             mu = np.zeros(d)
             x0 = np.zeros(d)
-            print(f" when sampling ou: theta: {theta}, mu: {mu}, x0: {x0}")
+            # print(f" when sampling ou: theta: {theta}, mu: {mu}, x0: {x0}")
             S = SignalGenerator.sample_ou_vectorized(n, theta, mu, sigma=1.0, dt=1.0, x0=x0)
         elif ts_type == 'ARMA':
             # if d != 3:
