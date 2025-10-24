@@ -1,11 +1,14 @@
+import matplotlib.pyplot as plt
 import jax
 import jax.numpy as jnp
 import signax
-
+import numpy as np
 def get_a_path(n, d):
     assert d == 2
     t = jnp.linspace(0, 4 * jnp.pi, n)
-    return jnp.concatenate([jnp.sin(t)[:, None], jnp.cos(t)[:, None]], axis=1)
+    dim1 = jnp.sin(t)
+    dim2 = jnp.cos(t)[:, None] + (np.random.randn(n) * 0.1)[:, None]
+    return jnp.concatenate([dim1[:, None], dim2], axis=1)
 
 def _tensor(a, b):
     return jnp.einsum("i,j->ij", a, b)
@@ -98,19 +101,80 @@ def controlled_signature_upto3(path, order: int):
     return jnp.concatenate([C1, C2.ravel(), C3.ravel()])
 
 def main():
-    n, d, order = 10, 2, 3
-    path = get_a_path(n, d)
+    n_samples, n, d, order = 10, 10, 2, 3
+    # path = get_a_path(n, d)
 
-    sig_lib = signax.signature(path, order)  # your installed signax uses (path, order)
-    sig_manual = signature_upto3(path, order)
-    ctrl_manual = controlled_signature_upto3(path, order)
+    
+    sigs_lib = []
+    sigs_manual = []
+    ctrls_manual = []
 
-    print("signax vs manual max|.|:", jnp.max(jnp.abs(sig_lib - sig_manual)).item())
-    print("controlled vector shape:", ctrl_manual.shape)
+    for i in range(n_samples):
+        path = get_a_path(n, d)
+        print("shape of path: ", path.shape)
+        sig_lib = signax.signature(path, order)  # your installed signax uses (path, order)
+        print("shape of si from lib:    ", sig_lib.shape)
+        sig_manual = signature_upto3(path, order)
+        ctrl_manual = controlled_signature_upto3(path, order)
+
+        sigs_lib.append(sig_lib)
+        sigs_manual.append(sig_manual)
+        ctrls_manual.append(ctrl_manual)
+
+    # for each of the indices, compare the distributions 
+    sigs_lib = jnp.stack(sigs_lib)
+    sigs_manual = jnp.stack(sigs_manual)
+    ctrls_manual = jnp.stack(ctrls_manual)  
+    
+    print(" HAVE WE STACKED THEM CORRECTLY?")
+    print("Shape of stacked signatures (signax): ", sigs_lib.shape)
+    print("Shape of stacked signatures (manual): ", sigs_manual.shape)
+    print("Shape of stacked controlled signatures (manual): ", ctrls_manual.shape)
+
+    mean_lib =  jnp.mean(sigs_lib, axis=0)
+    mean_manual = jnp.mean(sigs_manual, axis=0)
+    mean_ctrl = jnp.mean(ctrls_manual, axis=0)
+    print("Mean signature from signax: ", mean_lib)
+    print("Mean signature from manual: ", mean_manual)
+    print("Mean controlled signature from manual: ", mean_ctrl)
+    
+    var_lib =  jnp.var(sigs_lib, axis=0)
+    var_manual = jnp.var(sigs_manual, axis=0)
+    var_ctrl = jnp.var(ctrls_manual, axis=0)
+    print("Variance signature from signax: ", var_lib)
+    print("Variance signature from manual: ", var_manual)
+    print("Variance controlled signature from manual: ", var_ctrl)
+    
+    # generate plots to compare distributions
+    num_indices = sigs_lib.shape[1]
+    n_cols = 4
+    # Limit to max 6 rows
+    n_rows = min((num_indices + n_cols - 1) // n_cols, 6)
+    indices_to_plot = 14
+    _, axes = plt.subplots(n_rows, n_cols, figsize=(10, 10))
+    axes = axes.flatten() if num_indices > 1 else [axes]
+    
+    for i in range(indices_to_plot):
+        ax = axes[i]
+        ax.hist(sigs_lib[:, i], bins=10, alpha=0.6, label='signax',
+                color='blue')
+        ax.hist(sigs_manual[:, i], bins=10, alpha=0.6, label='manual',
+                color='orange')
+        ax.hist(ctrls_manual[:, i], bins=10, alpha=0.6, label='ctrl',
+                color='green')
+        ax.set_title(f'Index {i}', fontsize=10)
+        ax.set_xlabel('Value', fontsize=8)
+        ax.set_ylabel('Count', fontsize=8)
+        ax.legend(fontsize=8)
+        ax.tick_params(labelsize=8)
+    
+    # Hide unused subplots
+    for i in range(indices_to_plot, len(axes)):
+        axes[i].set_visible(False)
+    
+    plt.tight_layout()
+    plt.show()
 
 
-    print("signax signature:\n", sig_lib)
-    print("manual signature:\n", sig_manual)
-    print("manual controlled sig:\n", ctrl_manual)
 if __name__ == "__main__":
     main()
